@@ -13,9 +13,12 @@ import org.springframework.web.server.ResponseStatusException;
 @Transactional
 public class FinanceService {
   private final FinanceRepository repository;
+  private final com.shahran.finance.security.CurrentUser currentUser;
 
-  public FinanceService(FinanceRepository repository) {
+  public FinanceService(
+      FinanceRepository repository, com.shahran.finance.security.CurrentUser currentUser) {
     this.repository = repository;
+    this.currentUser = currentUser;
   }
 
   private ResponseStatusException missing() {
@@ -42,7 +45,7 @@ public class FinanceService {
   }
 
   public Transaction transaction(long id) {
-    return repository.transaction(id).orElseThrow(this::missing);
+    return repository.transaction(currentUser.id(), id).orElseThrow(this::missing);
   }
 
   public List<Transaction> transactions(String month, int limit, int offset) {
@@ -50,7 +53,7 @@ public class FinanceService {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Limit must be 1-100 and offset must be nonnegative");
     LocalDate start = month(month);
-    return repository.transactions(start, start.plusMonths(1), limit, offset);
+    return repository.transactions(currentUser.id(), start, start.plusMonths(1), limit, offset);
   }
 
   private void checkTransaction(TransactionInput input) {
@@ -62,48 +65,53 @@ public class FinanceService {
 
   public Transaction createTransaction(TransactionInput input) {
     checkTransaction(input);
-    return transaction(repository.insertTransaction(input));
+    return transaction(repository.insertTransaction(currentUser.id(), input));
   }
 
   public Transaction updateTransaction(long id, TransactionInput input) {
     checkTransaction(input);
-    if (repository.updateTransaction(id, input) == 0) throw missing();
+    if (repository.updateTransaction(currentUser.id(), id, input) == 0) throw missing();
     return transaction(id);
   }
 
   public void deleteTransaction(long id) {
-    if (repository.deleteTransaction(id) == 0) throw missing();
+    if (repository.deleteTransaction(currentUser.id(), id) == 0) throw missing();
   }
 
   public Budget budget(long id) {
-    return repository.budget(id).orElseThrow(this::missing);
+    return repository.budget(currentUser.id(), id).orElseThrow(this::missing);
   }
 
   public List<Budget> budgets(String month) {
-    return repository.budgets(month(month));
+    return repository.budgets(currentUser.id(), month(month));
   }
 
   public Budget createBudget(BudgetInput input) {
     checkCategory(input.categoryId());
-    return budget(repository.insertBudget(input, month(input.month())));
+    return budget(repository.insertBudget(currentUser.id(), input, month(input.month())));
   }
 
   public Budget updateBudget(long id, BudgetInput input) {
     checkCategory(input.categoryId());
-    if (repository.updateBudget(id, input, month(input.month())) == 0) throw missing();
+    if (repository.updateBudget(currentUser.id(), id, input, month(input.month())) == 0)
+      throw missing();
     return budget(id);
   }
 
   public void deleteBudget(long id) {
-    if (repository.deleteBudget(id) == 0) throw missing();
+    if (repository.deleteBudget(currentUser.id(), id) == 0) throw missing();
   }
 
   @Transactional(isolation = Isolation.REPEATABLE_READ, readOnly = true)
   public Summary summary(String month) {
     LocalDate start = month(month), end = start.plusMonths(1);
-    var income = repository.total(Type.INCOME, start, end);
-    var expenses = repository.total(Type.EXPENSE, start, end);
+    var income = repository.total(currentUser.id(), Type.INCOME, start, end);
+    var expenses = repository.total(currentUser.id(), Type.EXPENSE, start, end);
     return new Summary(
-        month, income, expenses, income.subtract(expenses), repository.progress(start, end));
+        month,
+        income,
+        expenses,
+        income.subtract(expenses),
+        repository.progress(currentUser.id(), start, end));
   }
 }

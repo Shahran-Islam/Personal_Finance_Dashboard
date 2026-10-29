@@ -16,9 +16,32 @@ import org.springframework.transaction.annotation.Transactional;
         "spring.datasource.url=jdbc:h2:mem:test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1")
 @AutoConfigureMockMvc
 @Transactional
+@org.springframework.security.test.context.support.WithMockUser(username = "test@example.com")
 class FinanceApiTest {
   @Autowired MockMvc mvc;
   @Autowired ObjectMapper mapper;
+  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+  @Autowired org.springframework.web.context.WebApplicationContext context;
+
+  @org.junit.jupiter.api.BeforeEach
+  void prepareUser() {
+    jdbc.update(
+        "INSERT INTO users(name,email,password_hash) VALUES(?,?,?)",
+        "Test",
+        "test@example.com",
+        "unused");
+    mvc =
+        org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+            .apply(
+                org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers
+                    .springSecurity())
+            .defaultRequest(
+                get("/")
+                    .with(
+                        org.springframework.security.test.web.servlet.request
+                            .SecurityMockMvcRequestPostProcessors.csrf()))
+            .build();
+  }
 
   String transaction(String amount, String type, String date) {
     return "{\"description\":\"Test\",\"amount\":"

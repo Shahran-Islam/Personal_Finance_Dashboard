@@ -1,118 +1,104 @@
-# Personal Finance Dashboard API
+# Still — Personal Finance Dashboard
+
+A full-stack personal finance app built with Java, Spring Boot, SQL, and vanilla JavaScript. Track income and expenses, plan category budgets, and review your month in a warm, glass-style dashboard.
 
 [Source code](https://github.com/Shahran-Islam/Personal_Finance_Dashboard) · [Build and tests](https://github.com/Shahran-Islam/Personal_Finance_Dashboard/actions)
 
-A Java backend for recording income and expenses, setting monthly category budgets, and calculating financial summaries. Built by Shahran Islam as a portfolio project.
+## Run it
 
-## Stack
-
-Java 21, Spring Boot 3.5, Spring JDBC, SQL, Flyway, H2 for local development, and PostgreSQL for the Docker setup. The API returns JSON; validation errors use HTTP problem details.
-
-## Run locally
-
-Install JDK 21+ and Maven 3.6.3+ and run:
+With JDK 21+ installed, double-click `run-app.cmd` on Windows, or run:
 
 ```sh
-mvn verify
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 
-The API runs at `http://localhost:8080/api`. The default H2 database persists in `data/finance.mv.db`. Flyway creates the tables and seven categories automatically. Transactions and budgets start empty. All amounts represent USD; this version does not convert currencies.
+On Windows PowerShell use `.\mvnw.cmd spring-boot:run`. The Maven wrapper downloads Maven on first use. Open **http://localhost:8080**, choose **Create an account**, and register with a name, email, and a password of at least 12 characters. New accounts start empty. Use **Try it with sample data** to insert a fictional month, or add your own transactions.
 
-```sh
-curl http://localhost:8080/api/categories
-curl -X POST http://localhost:8080/api/transactions -H "Content-Type: application/json" -d '{"description":"Weekly groceries","amount":42.75,"type":"EXPENSE","categoryId":3,"date":"2026-10-15"}'
-curl "http://localhost:8080/api/summaries?month=2026-10"
+The local H2 database persists in `data/`. Passwords are hashed; they cannot be recovered. Sessions expire after 30 minutes of inactivity. Restarting the server signs users out without deleting their records.
+
+## Features
+
+- Email/password registration, login, and logout with session cookies.
+- A responsive overview with monthly balance, income, expenses, savings rate, a daily chart, spending breakdown, and budget progress.
+- Transaction creation, editing, deletion, search, type filtering, and pagination.
+- Monthly category budgets with remaining amounts and overspending indicators.
+- Category reports and CSV transaction export.
+- Optional fictional sample data, inserted only into an empty month.
+- Server-side validation, CSRF protection, account ownership checks, and authentication rate limiting.
+
+## Stack and structure
+
+Java 21 · Spring Boot 3.5 · Spring Security · Spring JDBC · Flyway · H2 / PostgreSQL · HTML / CSS / JavaScript
+
+```text
+Browser -> Controller -> Service -> Repository -> SQL database
+                       Security: session authentication + CSRF
 ```
 
-On Windows PowerShell, use the Postman collection or `Invoke-RestMethod`:
+`src/main/resources/static` contains the frontend. `controller` handles HTTP, `service` owns financial rules and transactions, `repository` contains parameterized SQL, and `security` configures authentication and resolves the current account. All assets are served by the app itself.
 
-```powershell
-$body = @{ description='Weekly groceries'; amount=42.75; type='EXPENSE'; categoryId=3; date='2026-10-15' } | ConvertTo-Json
-Invoke-RestMethod http://localhost:8080/api/transactions -Method Post -ContentType application/json -Body $body
-Invoke-RestMethod 'http://localhost:8080/api/summaries?month=2026-10'
+## Data model
+
+```mermaid
+erDiagram
+    users ||--o{ transactions : owns
+    users ||--o{ budgets : owns
+    categories ||--o{ transactions : categorizes
+    categories ||--o{ budgets : limits
 ```
 
-## PostgreSQL with Docker
+Amounts use SQL `NUMERIC(12,2)` and Java `BigDecimal`. Budgets are unique by user, category, and month. Indexes begin with `user_id` to support account-scoped date and category queries. Date filters include the start of a month and exclude the start of the next. All amounts are USD.
 
-Copy `.env.example` to `.env`, set a local database password, then run `docker compose up --build`. The API is exposed only on localhost. Database storage persists in the `finance-data` volume. The container build runs the H2 integration tests; PostgreSQL runtime verification is a separate check.
+V2 retains older anonymous rows with a null owner; those rows are inaccessible to accounts until an administrator deliberately assigns them. It never gives old data to the first person who registers.
 
-## Endpoints
+## API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/categories` | List predefined categories |
-| POST | `/api/transactions` | Create a transaction |
-| GET | `/api/transactions?month=2026-10&limit=25&offset=0` | List transactions, newest first |
-| GET / PUT / DELETE | `/api/transactions/{id}` | Read, replace, or delete a transaction |
-| POST | `/api/budgets` | Create a category budget |
-| GET | `/api/budgets?month=2026-10` | List monthly budgets |
-| GET / PUT / DELETE | `/api/budgets/{id}` | Read, replace, or delete a budget |
-| GET | `/api/summaries?month=2026-10` | Income, expenses, balance, and budget progress |
+| GET | `/api/auth/csrf` | Obtain a CSRF token and header name |
+| POST | `/api/auth/register` | JSON name, email, password; returns 201 |
+| POST | `/api/auth/login` | Form-encoded email and password; returns 204 and session cookie |
+| GET | `/api/auth/me` | Current account profile |
+| POST | `/api/auth/logout` | Invalidate the session |
+| GET | `/api/categories` | Predefined categories |
+| GET / POST | `/api/transactions` | List by month / create |
+| GET / PUT / DELETE | `/api/transactions/{id}` | Read / replace / delete an owned transaction |
+| GET / POST | `/api/budgets` | List by month / create |
+| GET / PUT / DELETE | `/api/budgets/{id}` | Read / replace / delete an owned budget |
+| GET | `/api/summaries?month=2026-10` | Monthly totals and budget progress |
+| POST | `/api/demo?month=2026-10` | Insert fictional data into an empty month |
+| GET | `/health` | Public health check |
+
+All financial endpoints require a session. All POST/PUT/DELETE requests require a CSRF token from `/api/auth/csrf`. Send the returned token in its named header and retain cookies. Get a fresh token after login or logout. Login uses `application/x-www-form-urlencoded`; registration and financial writes use JSON.
 
 Transaction body:
 
 ```json
-{"description":"Weekly groceries","amount":42.75,"type":"EXPENSE","categoryId":3,"date":"2026-10-15"}
+{"description":"Groceries","amount":42.75,"type":"EXPENSE","categoryId":3,"date":"2026-10-15"}
 ```
 
 Budget body:
 
 ```json
-{"categoryId":3,"month":"2026-10","amount":350.00}
+{"categoryId":3,"month":"2026-10","amount":350}
 ```
 
-Creates return `201` with a `Location` header; reads and updates return `200`; deletes return `204`. Invalid input returns `400`, missing records return `404`, and a duplicate category/month budget returns `409`. PUT replaces all editable fields. Amounts must be positive, have at most two decimal places, and fit `NUMERIC(12,2)`. Income/expense direction comes from `type`, not the sign of the amount. Supported years are 0001–9998.
+List transactions with `?month=2026-10&limit=25&offset=0`. Limit is 1–100; offset must be nonnegative. PUT replaces editable fields. Positive amounts require at most two decimal places. Income/expense direction comes from type. Years 0001–9998 are accepted. Creates return 201, reads/updates 200, deletes 204, invalid input 400, unauthenticated reads 401, invalid CSRF 403, missing/unowned records 404, and conflicting budgets 409.
 
-Pagination uses a limit of 1–100 and a nonnegative offset. It is sorted by date and ID for consistent ordering. Categories are predefined and cannot be edited through this version of the API. A negative budget remainder indicates overspending. Summary totals include transactions even if their categories have no budget.
+## Tests
 
-## Architecture and database
-
-```text
-HTTP request -> FinanceController -> FinanceService -> FinanceRepository -> SQL database
+```sh
+./mvnw verify
 ```
 
-The controller handles HTTP and request validation. The service checks business rules and owns database transactions. The repository contains parameterized SQL. Records define the request and response shapes; database rows are not returned directly as unstructured maps.
+The integration suite covers CRUD, validation, exact financial totals, month boundaries, password hashing, sessions, logout, CSRF, duplicate accounts/budgets, ownership isolation, and sample data. GitHub Actions runs it on Java 21.
 
-```mermaid
-erDiagram
-    categories ||--o{ transactions : categorizes
-    categories ||--o{ budgets : limits
-    categories {
-        bigint id PK
-        varchar name UK
-    }
-    transactions {
-        bigint id PK
-        varchar description
-        numeric amount
-        varchar type
-        bigint category_id FK
-        date transaction_date
-    }
-    budgets {
-        bigint id PK
-        bigint category_id FK
-        date budget_month
-        numeric amount
-    }
-```
+Import `postman/Personal-Finance.postman_collection.json` and run it in order with the app running. The collection creates a disposable account, acquires CSRF tokens, logs in, tests the financial endpoints, and logs out. It removes the records it creates; the disposable test account remains. The frontend loads all pages for the selected month to generate reports; very large datasets would benefit from server-side reporting endpoints.
 
-Category names live in one table. A unique `(category_id, budget_month)` constraint prevents duplicate budgets. The service stores budget months as their first day. Transaction date and category/date indexes support monthly filtering and budget joins. Queries use inclusive start and exclusive next-month boundaries instead of extracting the month from every row. Amount calculations use SQL decimals and Java `BigDecimal`.
+## Deployment and limits
 
-## Tests and Postman
+See [deployment instructions](docs/DEPLOYMENT.md) for Docker/PostgreSQL and HTTPS hosting. The application includes a production configuration, but no hosting account is provisioned automatically. Run one instance until shared sessions/rate limiting are configured. Password recovery, email verification, MFA, and bank connections are not included.
 
-`mvn verify` exercises the HTTP layer, service, SQL queries, and Flyway schema against H2. Tests cover transaction and budget CRUD, duplicate budgets, invalid amounts/categories, malformed input, missing records, pagination, empty summaries, exact decimal totals, overspending, and month boundaries.
+[Code walkthrough](docs/WALKTHROUGH.md) · [Verification](docs/VERIFICATION.md) · [Portfolio description](docs/PORTFOLIO.md)
 
-Import `postman/Personal-Finance.postman_collection.json`, start the server, and run the collection in order. It saves created record IDs, checks status codes, and cleans up its transaction and budget. Use a fresh local database or a month/category without an existing budget. The collection is supplied for manual use; automated Spring tests are separate from running Postman.
-
-GitHub Actions runs `mvn verify` on pushes and pull requests.
-
-## Scope
-
-This is a single-user backend demonstration. It has no login, per-user ownership, bank connections, or frontend. Keep it on localhost and use fictional data. Before exposing write endpoints publicly, add authentication, ownership checks, and deployment configuration. A future portfolio website can link to the repository and show a recorded demo or read-only sample responses.
-
-See [the code walkthrough](docs/WALKTHROUGH.md) and [portfolio copy](docs/PORTFOLIO.md).
-
-Author profile: [Shahran Islam](https://github.com/Shahran-Islam).
-
+Author: [Shahran Islam](https://github.com/Shahran-Islam).

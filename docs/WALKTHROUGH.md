@@ -1,28 +1,17 @@
 # Code walkthrough
 
-Start with `FinanceController`. Follow `POST /api/transactions` to `FinanceService.createTransaction`, then `FinanceRepository.insertTransaction`. The controller validates the body, the service checks the category and date range, and the repository inserts the row and returns its generated ID. The service reads the created row back. The controller returns it with `201 Created` and a Location header.
+Start with `SecurityConfig`. Public routes serve static assets, registration, CSRF tokens, and a health check. Spring Security handles form login, session fixation protection, and logout. Passwords are encoded with BCrypt. Requests that change state require a CSRF token, including login and registration.
 
-Next read `V1__create_tables.sql`. Foreign keys keep category references valid; decimal columns avoid floating-point money errors; the budget uniqueness constraint enforces one budget per category per month even when requests race.
+`AuthController` validates signup input, normalizes email addresses, stores a password hash, and returns only public account fields. The browser then signs in using a form-encoded request and retrieves a fresh CSRF token. The session ID stays in an HttpOnly cookie; the frontend does not store credentials or tokens in localStorage.
 
-Then read `summary`. Income and expenses are aggregated in SQL rather than loading every transaction into memory. The budget query uses a left join so budgets with no spending still appear. The expense and date conditions belong in the join; moving them into the WHERE clause would remove those empty budgets. A repeatable-read transaction keeps the summary's queries on a consistent snapshot.
+Follow `POST /api/transactions` through `FinanceController`, `FinanceService`, and `FinanceRepository`. The service obtains the authenticated user's ID through `CurrentUser`; request bodies never choose their owner. Every transaction/budget lookup, update, delete, and aggregation includes the current user ID. An unowned resource returns 404.
 
-Finally read `FinanceApiTest`. `MockMvc` sends requests through Spring's real controller/service/repository stack. Each test rolls back its database writes. The summary test includes dates just outside October to catch month-filtering errors and verifies negative remaining funds for an overspent budget.
+`V1__create_tables.sql` defines categories, transactions, and budgets. `V2__user_accounts.sql` adds users and account ownership, preserving existing anonymous rows without exposing them. The unique budget constraint includes user, category, and month.
 
-## Decisions to understand
+The summary uses SQL aggregates and BigDecimal values. Its budget join includes both user and category so another account's expenses cannot leak into a budget. A repeatable-read transaction keeps the summary's queries consistent. Negative remaining funds indicate overspending.
 
-- JDBC keeps the database work visible and avoids an ORM layer for three small tables.
-- `BigDecimal` and `NUMERIC(12,2)` preserve cents. Negative amounts are rejected; transaction type determines direction.
-- All IDs and filters are SQL parameters rather than concatenated input.
-- Request records separate input validation from database mapping.
-- H2 makes the first run simple. PostgreSQL has its own runtime profile; H2 compatibility mode is not a substitute for PostgreSQL testing.
-- Offset pagination is easy to use, but newly inserted rows can move page boundaries between requests. Cursor pagination would be a useful extension.
-- There is no category management or authentication yet. Keep those as explicit next features rather than implying they already exist.
+The frontend consists of `index.html`, `app.css`, and `app.js`. The API helper attaches a CSRF header to writes, retains same-origin cookies, and handles expired sessions. Rendering escapes text before adding it to HTML. User-entered descriptions in CSV exports are quoted and guarded against spreadsheet formula injection. The overview, tables, budgets, and reports share the same selected month. Request generation IDs discard stale responses after a month change or logout.
 
-## Suggested personal changes
+`FinanceApiTest` covers the financial API. `AccountSecurityTest` covers password hashing, real login sessions, CSRF enforcement, account isolation, legacy data, and demo insertion. MockMvc exercises the real controller/service/repository path using an isolated H2 database.
 
-1. Add a category filter to transaction listing and test it together with the month filter.
-2. Add an endpoint that groups monthly expenses by category.
-3. Add PostgreSQL integration tests using Testcontainers.
-4. Build your own dashboard against this API after adding authentication if you intend to deploy writes publicly.
-
-Describe features you have actually run and understand. The Postman collection is ready to use, but only say you tested it in Postman after running it yourself.
+Next useful extensions: PostgreSQL integration tests with Testcontainers, server-side category reports for large datasets, email verification and password reset, and shared session storage for multiple instances.
